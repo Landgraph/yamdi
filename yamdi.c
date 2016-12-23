@@ -40,7 +40,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
+#ifdef _MSC_VER
+#include "unistd.h"
+#else
+#include <unistd.j>
+#endif
 #include <inttypes.h>
 #include <errno.h>
 
@@ -48,6 +52,13 @@
 	#define off_t _off64_t
 	#define fseeko(stream, offset, origin) fseeko64(stream, offset, origin)
 	#define ftello(stream) ftello64(stream)
+#endif
+
+#ifdef _MSC_VER
+	#define off_t __int64
+	#define fseeko(stream, offset, origin) _fseeki64(stream, offset, origin)
+	#define ftello(stream) _ftelli64(stream)
+	#pragma warning(disable : 4996)
 #endif
 
 #define YAMDI_VERSION			"1.9"
@@ -191,6 +202,9 @@ typedef struct {
 		short xmlomitkeyframes;		// -X
 
 		short overwriteinput;		// -w
+
+		short frameRate; // -r, Landgraph, 2016-12-23
+		short fixTimeStamp; // -f, Landgraph, 2016-12-23
 	} options;
 
 	buffer_t onmetadata;
@@ -281,7 +295,7 @@ void printUsage(void);
 int main(int argc, char **argv) {
 	FILE *fp_infile = NULL, *fp_outfile = NULL, *fp_xmloutfile = NULL;
 	int c, unlink_infile = 0;
-	char *infile, *outfile, *xmloutfile, *tempfile;
+	char *infile, *outfile, *xmloutfile, *tempfile, *creator;
 	FLV_t flv;
 
 #ifdef DEBUG
@@ -298,10 +312,11 @@ int main(int argc, char **argv) {
 	outfile = NULL;
 	xmloutfile = NULL;
 	tempfile = NULL;
+	creator = NULL;
 
 	initFLV(&flv);
 
-	while((c = getopt(argc, argv, ":i:o:x:t:c:a:lskMXwh")) != -1) {
+	while((c = getopt(argc, argv, ":i:o:x:t:c:a:r:lfskMXwh")) != -1) {
 		switch(c) {
 			case 'i':
 				infile = optarg;
@@ -332,6 +347,20 @@ int main(int argc, char **argv) {
 					flv.audio.keyframedistance = 0;
 					flv.options.addaudiokeyframes = 0;
 				}
+				break;
+/*
+Landgraph, 2016-12-23
+
+Added framerate to fix framerate
+*/
+			case 'r':
+				flv.options.frameRate = (short)strtol(optarg, (char **)NULL, 10);
+				if (flv.options.frameRate <= 0) {
+					flv.options.frameRate = 25;
+				}
+				break;
+			case 'f':
+				flv.options.fixTimeStamp = 1;
 				break;
 /*
 			case 'm':
@@ -565,6 +594,10 @@ int main(int argc, char **argv) {
 		fclose(fp_xmloutfile);
 
 	if(flv.options.overwriteinput == 1 && strcmp(infile, "-") && outfile != NULL && strcmp(outfile, "-")) {
+#ifdef _MSC_VER
+		if(remove(infile) != 0)
+			exit(YAMDI_RENAME_OUTPUT);
+#endif
 		if(rename(outfile, infile) != 0)
 			exit(YAMDI_RENAME_OUTPUT);
 	}
@@ -715,6 +748,15 @@ int analyzeFLV(FLV_t *flv, FILE *fp) {
 	fprintf(stderr, "[FLV] analyzing FLV ...\n");
 #endif
 
+	/*
+	Landgraph, 2016-12-23
+
+	Added framerate to fix framerate/duration
+	*/
+	if (flv->options.frameRate == 0)
+		flv->options.frameRate = 25;
+
+
 	for(i = 0; i < flv->index.nflvtags; i++) {
 		flvtag = &flv->index.flvtag[i];
 
@@ -819,6 +861,25 @@ int analyzeFLV(FLV_t *flv, FILE *fp) {
 #endif
 	}
 
+	if (flv->lasttimestamp == 0) {
+#ifdef DEBUG
+		fprintf(stderr, "[FLV] BAD lasttimestamp = %d ms\n", flv->lasttimestamp);
+#endif
+		if (flv->options.fixTimeStamp == 1) {
+			for (i = 0; i < flv->index.nflvtags; i++) {
+				flvtag = &flv->index.flvtag[i];
+				flvtag->timestamp = flv->lasttimestamp;
+				if (flvtag->tagtype == FLV_TAG_VIDEO) {
+					flv->lasttimestamp += 1000 / flv->options.frameRate;
+					flv->video.lasttimestamp = flv->lasttimestamp;
+				}
+			}
+		}
+#ifdef DEBUG
+		fprintf(stderr, "[FLV] FIXED lasttimestamp = %d ms\n", flv->lasttimestamp);
+#endif
+	}
+
 #ifdef DEBUG
 	fprintf(stderr, "[FLV] analyzing FLV (tag %d of %d)\n", i, flv->index.nflvtags);
 
@@ -828,18 +889,15 @@ int analyzeFLV(FLV_t *flv, FILE *fp) {
 	// Calculate the last second
 	if(flv->lasttimestamp >= 1000) {
 		flv->lastsecond = flv->lasttimestamp - 1000;
-		i = flv->index.nflvtags;
-		while(i != 0) {
-			flvtag = &flv->index.flvtag[i - 1];
+		for(i = (flv->index.nflvtags - 1); i >= 0; i--) {
+			flvtag = &flv->index.flvtag[i];
 
 			if(flvtag->timestamp <= flv->lastsecond) {
 				flv->lastsecond += 1;
-				flv->lastsecondindex = (i - 1);
+				flv->lastsecondindex = i;
 
 				break;
 			}
-
-			i--;
 		}
 	}
 	else
@@ -864,7 +922,7 @@ int analyzeFLV(FLV_t *flv, FILE *fp) {
 #endif
 
 	// Calculate video framerate
-	if(flv->video.ntags != 0)
+	if (flv->video.ntags != 0) 
 		flv->video.framerate = (double)flv->video.ntags / (double)flv->video.lasttimestamp * 1000.0;
 
 	// Calculate video datarate
@@ -1511,7 +1569,11 @@ int analyzeFLVH264VideoPacket(FLV_t *flv, FLVTag_t *flvtag, FILE *fp) {
 	int avcpackettype;
 	int i, length, offset, nSPS;
 	unsigned char *avcc;
+#ifdef _MSC_VER
+	unsigned char *buffer, *data = (unsigned char*)malloc(flvtag->datasize);
+#else
 	unsigned char *buffer, data[flvtag->datasize];
+#endif
 	h264data_t h264data;
 
 	readFLVTagData(data, sizeof(data), flvtag, fp);
@@ -1576,6 +1638,10 @@ int analyzeFLVH264VideoPacket(FLV_t *flv, FLVTag_t *flvtag, FILE *fp) {
 
 	flv->video.width = h264data.width;
 	flv->video.height = h264data.height;
+
+#ifdef _MSC_VER
+	free(data);
+#endif
 
 	return YAMDI_OK;
 }
@@ -2333,7 +2399,8 @@ void printUsage(void) {
 
 	fprintf(stderr, "SYNOPSIS\n");
 	fprintf(stderr, "\tyamdi -i input file [-x xml file | -o output file [-x xml file]]\n");
-	fprintf(stderr, "\t      [-t temporary file] [-c creator] [-a interval] [-skMXw] [-h]\n");
+	fprintf(stderr, "\t      [-t temporary file] [-c creator] [-a interval] [-skMXwf]\n");
+	fprintf(stderr, "\t      [-r frameRatePerSecond] [-h]\n");
 	fprintf(stderr, "\n");
 
 	fprintf(stderr, "DESCRIPTION\n");
@@ -2379,6 +2446,10 @@ void printUsage(void) {
 	fprintf(stderr, "\t-w\tReplace the input file with the output file. -i and -o are\n");
 	fprintf(stderr, "\t\trequired to be different files otherwise this option will be\n");
 	fprintf(stderr, "\t\tignored.\n");
+	fprintf(stderr, "\n");
+	fprintf(stderr, "\t-f\tRecalc timestamps for video tags.\n");
+	fprintf(stderr, "\n");
+	fprintf(stderr, "\t-r\tForce frame rate to.\n");
 	fprintf(stderr, "\n");
 	fprintf(stderr, "\t-h\tThis description.\n");
 	fprintf(stderr, "\n");
