@@ -362,7 +362,7 @@ Added framerate to fix framerate
 			case 'f':
 				flv.options.fixTimeStamp = 1;
 				break;
-/*
+				/*
 			case 'm':
 				flv.options.keepmetadata = 1;
 				break;
@@ -695,11 +695,11 @@ int indexFLV(FLV_t *flv, FILE *fp) {
 
 		offset += (flv->index.flvtag[nflvtags].tagsize + FLV_SIZE_PREVIOUSTAGSIZE);
 
-		nflvtags++;
 #ifdef DEBUG
 		if((nflvtags % 100) == 0)
-			fprintf(stderr, "[FLV] storing metadata (tag %d of %d)\r", nflvtags, flv->index.nflvtags);
+			fprintf(stderr, "[FLV] storing metadata (tag %d of %d)\n", nflvtags, flv->index.nflvtags);
 #endif
+		nflvtags++;
 	}
 
 #ifdef DEBUG
@@ -857,7 +857,7 @@ int analyzeFLV(FLV_t *flv, FILE *fp) {
 
 #ifdef DEBUG
 		if((i % 100) == 0)
-			fprintf(stderr, "[FLV] analyzing FLV (tag %d of %d)\r", i, flv->index.nflvtags);
+			fprintf(stderr, "[FLV] analyzing FLV (tag %d of %d)\n", i, flv->index.nflvtags);
 #endif
 	}
 
@@ -1567,7 +1567,7 @@ int analyzeFLVVP6AlphaVideoPacket(FLV_t *flv, FLVTag_t *flvtag, FILE *fp) {
 
 int analyzeFLVH264VideoPacket(FLV_t *flv, FLVTag_t *flvtag, FILE *fp) {
 	int avcpackettype;
-	int i, length, offset, nSPS;
+	unsigned short i, length, offset, nSPS;
 	unsigned char *avcc;
 #ifdef _MSC_VER
 	unsigned char *buffer, *data = (unsigned char*)malloc(flvtag->datasize);
@@ -1576,7 +1576,8 @@ int analyzeFLVH264VideoPacket(FLV_t *flv, FLVTag_t *flvtag, FILE *fp) {
 #endif
 	h264data_t h264data;
 
-	readFLVTagData(data, sizeof(data), flvtag, fp);
+	readFLVTagData(data, flvtag->datasize, flvtag, fp);
+
 	// Skip the VIDEODATA header
 	buffer = &data[1];
 
