@@ -59,6 +59,9 @@
 	#define fseeko(stream, offset, origin) _fseeki64(stream, offset, origin)
 	#define ftello(stream) _ftelli64(stream)
 	#pragma warning(disable : 4996)
+#ifdef _DEBUG
+#define DEBUG
+#endif
 #endif
 
 #define YAMDI_VERSION			"1.9"
@@ -316,7 +319,7 @@ int main(int argc, char **argv) {
 
 	initFLV(&flv);
 
-	while((c = getopt(argc, argv, ":i:o:x:t:c:a:r:lfskMXwh")) != -1) {
+	while((c = getopt(argc, argv, ":i:o:x:t:c:a:r:lfFskMXwh")) != -1) {
 		switch(c) {
 			case 'i':
 				infile = optarg;
@@ -362,7 +365,10 @@ Added framerate to fix framerate
 			case 'f':
 				flv.options.fixTimeStamp = 1;
 				break;
-				/*
+            case 'F':
+                flv.options.fixTimeStamp = 2;
+                break;
+/*
 			case 'm':
 				flv.options.keepmetadata = 1;
 				break;
@@ -483,6 +489,7 @@ Added framerate to fix framerate
 		if(unlink_infile == 1)
 			unlink(infile);
 
+        fprintf(stderr, "Can't open input file for reading\n");
 		exit(YAMDI_ERROR);
 	}
 
@@ -493,7 +500,8 @@ Added framerate to fix framerate
 		if(unlink_infile == 1)
 			unlink(infile);
 
-		exit(YAMDI_ERROR);
+        fprintf(stderr, "Invalid FLV file on input\n");
+        exit(YAMDI_ERROR);
 	}
 
 	// Open the outfile
@@ -525,7 +533,8 @@ Added framerate to fix framerate
 				if(unlink_infile == 1)
 					unlink(infile);
 
-				exit(YAMDI_ERROR);
+                fprintf(stderr, "Can't open output XML file for writing\n");
+                exit(YAMDI_ERROR);
 			}
 		}
 		else
@@ -548,6 +557,7 @@ Added framerate to fix framerate
 		if(unlink_infile == 1)
 			unlink(infile);
 
+        fprintf(stderr, "Can't index FLV file\n");
 		exit(YAMDI_ERROR);
 	}
 
@@ -557,7 +567,8 @@ Added framerate to fix framerate
 		if(unlink_infile == 1)
 			unlink(infile);
 
-		exit(YAMDI_ERROR);
+        fprintf(stderr, "Can't analyze FLV file\n");
+        exit(YAMDI_ERROR);
 	}
 
 	if(finalizeFLV(&flv, fp_infile) != YAMDI_OK) {
@@ -566,7 +577,8 @@ Added framerate to fix framerate
 		if(unlink_infile == 1)
 			unlink(infile);
 
-		exit(YAMDI_ERROR);
+        fprintf(stderr, "Can't finalize FLV file\n");
+        exit(YAMDI_ERROR);
 	}
 
 #ifdef DEBUG
@@ -861,11 +873,11 @@ int analyzeFLV(FLV_t *flv, FILE *fp) {
 #endif
 	}
 
-	if (flv->lasttimestamp == 0) {
+	if (flv->lasttimestamp == 0 || flv->options.fixTimeStamp == 2) {
 #ifdef DEBUG
-		fprintf(stderr, "[FLV] BAD lasttimestamp = %d ms\n", flv->lasttimestamp);
+		fprintf(stderr, "[FLV] Readed lasttimestamp = %d ms\n", flv->lasttimestamp);
 #endif
-		if (flv->options.fixTimeStamp == 1) {
+		if (flv->options.fixTimeStamp != 0) {
 			for (i = 0; i < flv->index.nflvtags; i++) {
 				flvtag = &flv->index.flvtag[i];
 				flvtag->timestamp = flv->lasttimestamp;
@@ -1448,24 +1460,24 @@ int analyzeFLVH263VideoPacket(FLV_t *flv, FLVTag_t *flvtag, FILE *fp) {
 			flv->video.height = ((buffer[6] & 0x7f) << 9) + (buffer[7] << 1) + ((buffer[8] >> 7) & 0x1);
 			break;
 		case 2: // CIF
-			flv->video.width = 352.0;
-			flv->video.height = 288.0;
+			flv->video.width = 352;
+			flv->video.height = 288;
 			break;
 		case 3: // QCIF
-			flv->video.width = 176.0;
-			flv->video.height = 144.0;
+			flv->video.width = 176;
+			flv->video.height = 144;
 			break;
 		case 4: // SQCIF
-			flv->video.width = 128.0;
-			flv->video.height = 96.0;
+			flv->video.width = 128;
+			flv->video.height = 96;
 			break;
 		case 5:
-			flv->video.width = 320.0;
-			flv->video.height = 240.0;
+			flv->video.width = 320;
+			flv->video.height = 240;
 			break;
 		case 6:
-			flv->video.width = 160.0;
-			flv->video.height = 120.0;
+			flv->video.width = 160;
+			flv->video.height = 120;
 			break;
 		default:
 			break;
@@ -1495,7 +1507,7 @@ int analyzeFLVVP6VideoPacket(FLV_t *flv, FLVTag_t *flvtag, FILE *fp) {
 
 	readFLVTagData(data, sizeof(data), flvtag, fp);
 
-#if DEBUG
+#ifdef DEBUG 
 	fprintf(stderr, "\n");
 
 	fprintf(stderr, "[VP6] ");
@@ -1522,7 +1534,7 @@ int analyzeFLVVP6VideoPacket(FLV_t *flv, FLVTag_t *flvtag, FILE *fp) {
 
 	int version2 = ((buffer[2] >> 1) & 0x03);
 
-#if DEBUG
+#ifdef DEBUG
 	int version = ((buffer[2] >> 3) & 0x1f);
 	int interlace = (buffer[2] & 0x01);
 
@@ -1536,7 +1548,7 @@ int analyzeFLVVP6VideoPacket(FLV_t *flv, FLVTag_t *flvtag, FILE *fp) {
 	if(marker == 1 || version2 == 0)
 		offset += 2;
 
-#if DEBUG
+#ifdef DEBUG
 	fprintf(stderr, "[VP6] offset = %d\n", offset);
 	fprintf(stderr, "[VP6] dim_y = %d\n", buffer[offset]);
 	fprintf(stderr, "[VP6] dim_x = %d\n", buffer[offset + 1]);
@@ -2450,7 +2462,9 @@ void printUsage(void) {
 	fprintf(stderr, "\n");
 	fprintf(stderr, "\t-f\tRecalc timestamps for video tags.\n");
 	fprintf(stderr, "\n");
-	fprintf(stderr, "\t-r\tForce frame rate to.\n");
+    fprintf(stderr, "\t-F\tForce recalc timestamps for video tags.\n");
+    fprintf(stderr, "\n");
+    fprintf(stderr, "\t-r\tForce frame rate to.\n");
 	fprintf(stderr, "\n");
 	fprintf(stderr, "\t-h\tThis description.\n");
 	fprintf(stderr, "\n");
